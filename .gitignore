@@ -1,0 +1,10 @@
+# vim swap files
+.*.sw*
+.sw*
+# obj files
+*.out
+core.[0-9]?*
+*.o
+*.so
+## gnuplot files
+*-core*.txt

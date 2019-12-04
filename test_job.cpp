@@ -20,7 +20,7 @@ static uint32_t parallel_jobs     = 1000, /* how many parallel jobs */
 
 static void
 work_task( int &result ) {
-  for (int j = 1; j <= task_workload; j++) {
+  for (uint32_t j = 1; j <= task_workload; j++) {
     /*for (int i = 1; i <= 10; i++) {*/
       result += ( 1 << ( result & 3 )) - j * 2;
       /* use result so it doesn't get optimized away */
@@ -31,7 +31,6 @@ work_task( int &result ) {
 
 static void
 work_task_job( JobTaskThread &w,  Job &j ) {
-  uint32_t n;
   int result = 0;
   /* track job make sure all have run and not twice */
   /* set_job_bit( j.job_id );*/

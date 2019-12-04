@@ -94,7 +94,7 @@ struct WSQIndex {
     this->count  = (uint16_t) ( v >> 16 );
     this->used   = (uint16_t) ( v >> 0 );
   }
-  operator uint64_t() const {
+  uint64_t u64( void ) const {
     return ( (uint64_t) this->top << 48 ) |
            ( (uint64_t) this->bottom << 32 ) |
            ( (uint64_t) this->count << 16 ) |
@@ -133,11 +133,11 @@ struct Job {
 struct WSQ {
   std::atomic<Job *>    entries[ MAX_QUEUE_JOBS ]; /* queue of jobs */
   std::atomic<uint64_t> idx;       /* the WSQIndex packed in 64 bits */
-  const uint32_t        worker_id; /* owner of queue */
+  const uint16_t        worker_id; /* owner of queue */
 
-  WSQ( uint32_t id ) : worker_id( id ) {
+  WSQ( uint16_t id ) : worker_id( id ) {
     WSQIndex i = { 0, 0, 0, 0 };
-    this->idx.store( i, std::memory_order_relaxed );
+    this->idx.store( i.u64(), std::memory_order_relaxed );
     ::memset( this->entries, 0, sizeof( this->entries ) );
   }
   /* try_push() can only be called by the thread which owns this queue */
@@ -150,7 +150,7 @@ struct WSQ {
     WSQIndex j = { i.top, (uint16_t) ( ( i.bottom+1 ) & MASK_JOBS ),
                    (uint16_t) ( i.count+1 ), (uint16_t) ( job.job_id ) };
     /* try to acquire an entries[] index for job */
-    if ( std::atomic_compare_exchange_strong( &this->idx, &v, j ) ) {
+    if ( std::atomic_compare_exchange_strong( &this->idx, &v, j.u64() ) ) {
       for (;;) {
         Job * old = this->entries[ i.bottom ].exchange( nullptr,
                                                   std::memory_order_relaxed );
@@ -178,7 +178,7 @@ struct WSQ {
       WSQIndex j = { i.top, (uint16_t) ( ( i.bottom-1 ) & MASK_JOBS ),
                      (uint16_t) ( i.count-1 ), 1 };
       /* fetch idx location, it could be stolen first */
-      if ( std::atomic_compare_exchange_strong( &this->idx, &v, j ) ) {
+      if ( std::atomic_compare_exchange_strong( &this->idx, &v, j.u64() ) ) {
         Job *job = this->entries[ j.bottom ].exchange( nullptr,
                                                std::memory_order_relaxed );
         assert( job != nullptr ); /* should not be empty, it's my queue */
@@ -196,7 +196,7 @@ struct WSQ {
       WSQIndex j = { (uint16_t) ( ( i.top+1 ) & MASK_JOBS ), i.bottom,
                      (uint16_t) ( i.count-1 ), 0 };
       /* try to fetch the next available index */
-      if ( std::atomic_compare_exchange_strong( &this->idx, &v, j ) ) {
+      if ( std::atomic_compare_exchange_strong( &this->idx, &v, j.u64() ) ) {
         for (;;) {
           Job *job = this->entries[ i.top ].exchange( nullptr,
                                                 std::memory_order_relaxed );
@@ -221,15 +221,15 @@ struct JobTaskThread {
   WSQ             queue;     /* the work stealing queue above */
   XoroRand        rand;      /* rand state for choosing a task to steal from */
   JobSysCtx     & ctx;       /* contains all of the threads */
-  const uint32_t  worker_id; /* the index of task[] in JobSysCtx for this thr */
   JobAllocBlock * cur_block; /* allocate jobs from this block */
   void          * data;      /* application closure for thread */
+  const uint16_t  worker_id; /* the index of task[] in JobSysCtx for this thr */
 
   void * operator new( size_t, void *ptr ) { return ptr; }
   void operator delete( void *ptr ) { std::free( ptr ); }
 
-  JobTaskThread( JobSysCtx &c,  uint32_t id,  int seed,  void *dat )
-    : queue( id ), ctx( c ), worker_id( id ), cur_block( 0 ), data( dat ) {
+  JobTaskThread( JobSysCtx &c,  uint32_t id,  uint64_t seed,  void *dat )
+    : queue( id ), ctx( c ), cur_block( 0 ), data( dat ), worker_id( id ) {
     this->rand.init( id, seed );
   }
   /* allocate space from cur_block for job */
@@ -266,7 +266,7 @@ struct JobAllocBlock {
 
   JobAllocBlock() : avail_count( MAX_QUEUE_JOBS ) {
     /* referenced by each job and by JobTaskThread */
-    this->ref_count.store( MAX_QUEUE_JOBS + 1, std::memory_order_seq_cst );
+    this->ref_count.store( MAX_QUEUE_JOBS + 1, std::memory_order_relaxed );
   }
   /* while available, return next slot */
   void * new_job( void ) {
@@ -295,10 +295,10 @@ struct JobSysCtx {
 
   /* workers run until is_sys_active is false */
   void activate( void ) {
-    this->is_sys_active.store( true, std::memory_order_seq_cst );
+    this->is_sys_active.store( true, std::memory_order_relaxed );
   }
   void deactivate( void ) {
-    this->is_sys_active.store( false, std::memory_order_seq_cst );
+    this->is_sys_active.store( false, std::memory_order_relaxed );
   }
   JobSysCtx() : job_counter( 0 ), task_count( 0 ), is_sys_active( false ) {}
 };
@@ -311,7 +311,7 @@ JobSysCtx::initialize_worker( int64_t seed,  void *data ) {
   void * m = ::aligned_alloc( 64, sizeof( JobTaskThread ) );
   JobTaskThread * thr = new ( m ) JobTaskThread( *this, count, seed, data );
   this->task[ count ] = thr;
-  this->task_count.store( count+1, std::memory_order_acq_rel );
+  this->task_count.store( count+1, std::memory_order_relaxed );
   return thr;
 }
 
@@ -417,7 +417,7 @@ Job::Job( JobTaskThread &t,  JobFunction f,  void *d,  Job *p )
     alloc_block( *t.cur_block ),
     job_id( t.ctx.job_counter.fetch_add( 1, std::memory_order_relaxed ) ),
     execute_worker_id( 0 ), is_done( false ), is_waiting( false ) {
-  this->unfinished_jobs.store( 1, std::memory_order_acq_rel );
+  this->unfinished_jobs.store( 1, std::memory_order_relaxed );
   if ( p != nullptr )
     p->unfinished_jobs.fetch_add( 1, std::memory_order_relaxed );
 }

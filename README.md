@@ -49,7 +49,7 @@ worker thread.
 ```console
 $ git clone https://injinj.github.com/WSQ
 $ cd WSQ
-$ g++ -O3 -ggdb test_job.cpp
+$ g++ -std=c++11 -O3 -ggdb test_job.cpp -pthread
 $ a.out -c 1
 Number of threads: 1
 Serial workload:   1000 iterations

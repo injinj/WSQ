@@ -13,7 +13,7 @@ worker_thread_function( JobTaskThread *w ) {
 std::atomic<uint64_t> job_cnt;
 
 /* cpus used and test iteraitions */
-static uint32_t parallel_jobs     = 1000, /* how many parallel jobs */
+static uint32_t parallel_jobs     = 10000, /* how many parallel jobs */
                 num_cores         = 8,    /* can't be more than MAX_TASKS */
                 serial_iterations = 1000, /* how many serial test cases */
                 task_workload     = 100;  /* the workload to test (iterations)*/
@@ -30,7 +30,7 @@ work_task( int &result ) {
 }
 
 static void
-work_task_job( JobTaskThread &w,  Job &j ) {
+work_task_job( JobTaskThread &w,  Job &/*j*/ ) {
   int result = 0;
   /* track job make sure all have run and not twice */
   /* set_job_bit( j.job_id );*/
@@ -104,9 +104,13 @@ main( int argc,  char *argv[] ) {
   uint64_t serial_elapsed_nanos, par_elapsed_nanos, serial_per_job, par_per_job;
 
   if ( ! graph ) {
-    printf( "Number of threads: %u\n", num_cores );
-    printf( "Serial workload:   %u iterations\n", serial_iterations );
-    printf( "Parallel workload: %u jobs\n", parallel_jobs );
+    printf( "Sizeof Job Sys Ctx: %lu\n", sizeof( JobSysCtx ) );
+    printf( "Sizeof Job Thread:  %lu\n", sizeof( JobTaskThread ) );
+    printf( "Sizeof Job:         %lu\n", sizeof( Job ) );
+    printf( "Sizeof Job Alloc:   %lu\n", sizeof( JobAllocBlock ) );
+    printf( "Number of threads:  %u\n", num_cores );
+    printf( "Serial workload:    %u iterations\n", serial_iterations );
+    printf( "Parallel workload:  %u jobs\n", parallel_jobs );
   }
   JobSysCtx job_context;
   job_context.activate();
@@ -161,7 +165,12 @@ main( int argc,  char *argv[] ) {
       printf( "%8u  ", task_workload );
       printf( "%11lu ns  ", serial_per_job );
       printf( "%13lu ns  ", par_per_job );
-      printf( "%7.2f\n", (double) serial_per_job / (double) par_per_job );
+      printf( "%7.2f", (double) serial_per_job / (double) par_per_job );
+      if ( serial_per_job < par_per_job )
+        printf( "  (- %lu / thr: %lu)",
+                par_per_job - serial_per_job,
+                ( par_per_job - serial_per_job ) / num_cores );
+      printf( "\n" );
     }
     else {
       printf( "%u %lu %lu %.2f\n", task_workload, serial_per_job, par_per_job,

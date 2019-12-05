@@ -9,10 +9,10 @@
 /* this algo is derived from: https://github.com/cdwfs/cds_job */
 
 namespace job {
-                      /* size of the queue for each task (32k limit) */
-static const uint16_t MAX_QUEUE_JOBS  = 8192,
+                      /* size of the queue for each task (64k limit) */
+static const uint32_t MAX_QUEUE_JOBS  = 64 * 1024;
                       /* no more than this number of task threads */
-                      MAX_TASKS       = 64,
+static const uint16_t MAX_TASKS       = 64,
                       /* mask to avoid mod operator */
                       MASK_JOBS       = MAX_QUEUE_JOBS - 1,
                       /* when queue is full, allow space for queue contention */
@@ -116,7 +116,7 @@ struct Job {
                         is_waiting; /* if a thread is waiting for this job */
 
   void * operator new( size_t, void *ptr ) { return ptr; }
-  void operator delete( void *ptr ) {} /* is allocated in alloc_block */
+  void operator delete( void * ) {} /* is allocated in alloc_block */
 
   Job( JobTaskThread &t,   /* the thread where job is queued */
        JobFunction f,      /* the function to execute */
@@ -256,17 +256,19 @@ struct JobTaskThread {
 
 struct JobAllocBlock {
   /* align job on 64 byte cache line */
-  static const size_t JOB_SIZE = ( ( sizeof( Job ) + 63 ) / 64 ) * 64;
-  uint8_t mem[ JOB_SIZE * MAX_QUEUE_JOBS ];
-  uint16_t avail_count; /* how many jobs are available */
-  std::atomic<uint16_t> ref_count; /* how many jobs are used */
+  static const size_t JOB_SIZE = ( ( sizeof( Job ) + 63 ) / 64 ) * 64,
+                      NUM_ALLOC_JOBS = ( MAX_QUEUE_JOBS > 4096 ?
+                                         ( MAX_QUEUE_JOBS >> 6 ) : 64 ) - 1;
+  uint8_t mem[ JOB_SIZE * NUM_ALLOC_JOBS ];
+  uint32_t avail_count; /* how many jobs are available */
+  std::atomic<uint32_t> ref_count; /* how many jobs are used */
 
   void * operator new( size_t, void *ptr ) { return ptr; }
   void operator delete( void *ptr ) { std::free( ptr ); }
 
-  JobAllocBlock() : avail_count( MAX_QUEUE_JOBS ) {
+  JobAllocBlock() : avail_count( NUM_ALLOC_JOBS ) {
     /* referenced by each job and by JobTaskThread */
-    this->ref_count.store( MAX_QUEUE_JOBS + 1, std::memory_order_relaxed );
+    this->ref_count.store( NUM_ALLOC_JOBS + 1, std::memory_order_relaxed );
   }
   /* while available, return next slot */
   void * new_job( void ) {
@@ -278,7 +280,7 @@ struct JobAllocBlock {
   }
   /* if all freed, delete the block */
   void deref( void ) {
-    uint16_t left = this->ref_count.fetch_sub( 1, std::memory_order_relaxed );
+    uint32_t left = this->ref_count.fetch_sub( 1, std::memory_order_relaxed );
     if ( left == 1 )
       delete this;
   }

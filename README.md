@@ -38,10 +38,10 @@ their own queues.
 ```
 
 The parallelism obtained by this lock-free structure is fine grained.  The test
-included is able to schedule synthetic jobs with approximately 100 ns of
-overhead on my <b>i9-7960X</b> cpu.  I surmise that most of the this is due to
-the cache coherency overhead of the x86 <b>cmpxchg</b> and <b>xchg</b>
-instructions along with push/pop mechanics of the queue.
+included is able to schedule synthetic jobs with approximately 100 ns (per
+thread) of overhead on my <b>i9-7960X</b> cpu.  I surmise that most of the this
+is due to the cache coherency overhead of the x86 <b>cmpxchg</b> and
+<b>xchg</b> instructions along with push/pop mechanics of the queue.
 
 I measure this 100 ns overhead by putting jobs into the queue with only one
 worker thread.
@@ -51,25 +51,50 @@ $ git clone https://injinj.github.com/WSQ
 $ cd WSQ
 $ g++ -std=c++11 -O3 -ggdb test_job.cpp -pthread
 $ a.out -c 1
-Number of threads: 1
-Serial workload:   1000 iterations
-Parallel workload: 1000 jobs
+Sizeof Job Sys Ctx: 528
+Sizeof Job Thread:  524352
+Sizeof Job:         56
+Sizeof Job Alloc:   65480
+Number of threads:  1
+Serial workload:    1000 iterations
+Parallel workload:  10000 jobs
 Workload  Serial Elapsed  Parallel Elapsed  Speedup
 --------  --------------  ----------------  -------
-     100          142 ns            255 ns     0.56
-     200          286 ns            400 ns     0.71
-     300          430 ns            549 ns     0.78
-     400          575 ns            686 ns     0.84
-     500          721 ns            833 ns     0.87
-     600          863 ns            974 ns     0.89
-     700         1011 ns           1148 ns     0.88
-     800         1156 ns           1269 ns     0.91
-     900         1300 ns           1540 ns     0.84
-    1000         1444 ns           1550 ns     0.93
-    1100         1620 ns           1689 ns     0.96
-    1200         1735 ns           1843 ns     0.94
-    1300         2000 ns           2007 ns     1.00
-    1400         2097 ns           2143 ns     0.98
+     100          143 ns            236 ns     0.61  (- 93 / thr: 93)
+     200          288 ns            383 ns     0.75  (- 95 / thr: 95)
+     300          432 ns            518 ns     0.83  (- 86 / thr: 86)
+     400          578 ns            650 ns     0.89  (- 72 / thr: 72)
+     500          721 ns            792 ns     0.91  (- 71 / thr: 71)
+     600          870 ns            938 ns     0.93  (- 68 / thr: 68)
+^C
+$ a.out -c 2                                                            
+Sizeof Job Sys Ctx: 528
+Sizeof Job Thread:  524352
+Sizeof Job:         56
+Sizeof Job Alloc:   65480
+Number of threads:  2
+Serial workload:    1000 iterations
+Parallel workload:  10000 jobs
+Workload  Serial Elapsed  Parallel Elapsed  Speedup
+--------  --------------  ----------------  -------
+     100          142 ns            276 ns     0.51  (- 134 / thr: 67)
+     200          287 ns            285 ns     1.01
+     300          435 ns            345 ns     1.26
+     400          579 ns            409 ns     1.42
+^C
+a.out -c 3
+Sizeof Job Sys Ctx: 528
+Sizeof Job Thread:  524352
+Sizeof Job:         56
+Sizeof Job Alloc:   65480
+Number of threads:  3
+Serial workload:    1000 iterations
+Parallel workload:  10000 jobs
+Workload  Serial Elapsed  Parallel Elapsed  Speedup
+--------  --------------  ----------------  -------
+     100          144 ns            473 ns     0.30  (- 329 / thr: 109)
+     200          287 ns            375 ns     0.77  (- 88 / thr: 29)
+     300          432 ns            335 ns     1.29
 ```
 
 I also created a gnuplot script to graph the speedup of this synthetic

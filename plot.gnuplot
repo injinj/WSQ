@@ -64,11 +64,12 @@
 !./a.out -c 16 -g > 16-core.txt
 !tail -1 16-core.txt | awk '{ printf "%s %s 16-core\n", $2, $4 }' > 16-corelabel.txt
 
-set title "Job Stealing Queue (1000 jobs x workload nonoseconds)"
+set title "Job Stealing Queue (100000 jobs x workload nonoseconds)"
 set xlabel "Workload Nanoseconds"
 set ylabel "Parallel Speedup"
 unset key
 set ytics 1
+set xtics 500
 set grid
 
 plot "1-core.txt" using 2:4 with linespoints, \

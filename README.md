@@ -68,13 +68,7 @@ Workload  Serial Elapsed  Parallel Elapsed  Speedup
      600          870 ns            938 ns     0.93  (- 68 / thr: 68)
 ^C
 $ a.out -c 2                                                            
-Sizeof Job Sys Ctx: 528
-Sizeof Job Thread:  524352
-Sizeof Job:         56
-Sizeof Job Alloc:   65480
-Number of threads:  2
-Serial workload:    1000 iterations
-Parallel workload:  10000 jobs
+...
 Workload  Serial Elapsed  Parallel Elapsed  Speedup
 --------  --------------  ----------------  -------
      100          142 ns            276 ns     0.51  (- 134 / thr: 67)
@@ -82,19 +76,14 @@ Workload  Serial Elapsed  Parallel Elapsed  Speedup
      300          435 ns            345 ns     1.26
      400          579 ns            409 ns     1.42
 ^C
-a.out -c 3
-Sizeof Job Sys Ctx: 528
-Sizeof Job Thread:  524352
-Sizeof Job:         56
-Sizeof Job Alloc:   65480
-Number of threads:  3
-Serial workload:    1000 iterations
-Parallel workload:  10000 jobs
+$ a.out -c 3
+...
 Workload  Serial Elapsed  Parallel Elapsed  Speedup
 --------  --------------  ----------------  -------
      100          144 ns            473 ns     0.30  (- 329 / thr: 109)
      200          287 ns            375 ns     0.77  (- 88 / thr: 29)
      300          432 ns            335 ns     1.29
+^C
 ```
 
 I also created a gnuplot script to graph the speedup of this synthetic

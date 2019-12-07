@@ -134,8 +134,9 @@ struct WSQ {
   std::atomic<Job *>    entries[ MAX_QUEUE_JOBS ]; /* queue of jobs */
   std::atomic<uint64_t> idx;       /* the WSQIndex packed in 64 bits */
   const uint16_t        worker_id; /* owner of queue */
+  uint16_t              push_avail; /* number of push slots available */
 
-  WSQ( uint16_t id ) : worker_id( id ) {
+  WSQ( uint16_t id ) : worker_id( id ), push_avail( FULL_QUEUE_JOBS ) {
     WSQIndex i = { 0, 0, 0, 0 };
     this->idx.store( i.u64(), std::memory_order_relaxed );
     ::memset( this->entries, 0, sizeof( this->entries ) );
@@ -170,6 +171,7 @@ struct WSQ {
   }
   /* push multiple items */
   void multi_push( Job **jar,  uint16_t n ) {
+    this->push_avail -= n;
     for (;;) {
       uint64_t v = this->idx.load( std::memory_order_relaxed );
       WSQIndex i( v );
@@ -231,17 +233,20 @@ struct WSQ {
     }
   }
   /* test if space available for multi-push */
-  uint16_t multi_push_avail( uint16_t maxn ) const {
+  uint16_t multi_push_avail( uint16_t maxn ) {
+    if ( maxn <= this->push_avail )
+      return maxn;
     WSQIndex i = this->idx.load( std::memory_order_relaxed );
     uint16_t k;
-    if ( maxn > FULL_QUEUE_JOBS - i.count )
-      maxn = FULL_QUEUE_JOBS - i.count;
-    for ( k = 0; k < maxn; k++ ) {
-      if ( this->entries[ ( i.top + k ) & MASK_JOBS ].
+    for ( k = 0; k < FULL_QUEUE_JOBS; k++ ) {
+      if ( this->entries[ ( i.bottom + k ) & MASK_JOBS ].
                  load( std::memory_order_relaxed ) != nullptr )
         break;
     }
-    return k;
+    this->push_avail = k;
+    if ( maxn > k )
+      maxn = k;
+    return maxn;
   }
 };
 

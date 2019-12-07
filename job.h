@@ -168,6 +168,23 @@ struct WSQ {
     }
     return false; /* failed to acquire idx location */
   }
+  /* push multiple items */
+  void multi_push( Job **jar,  uint16_t n ) {
+    for (;;) {
+      uint64_t v = this->idx.load( std::memory_order_relaxed );
+      WSQIndex i( v );
+      WSQIndex j = { i.top, (uint16_t) ( ( i.bottom+n ) & MASK_JOBS ),
+                     (uint16_t) ( i.count+n ), 2 };
+      /* try to acquire an entries[] index for job */
+      if ( std::atomic_compare_exchange_strong( &this->idx, &v, j.u64() ) ) {
+        for ( uint16_t k = 0; k < n; k++ ) {
+          this->entries[ ( i.bottom + k ) & MASK_JOBS ].store( jar[ k ],
+                                                    std::memory_order_relaxed );
+        }
+        return;
+      }
+    }
+  }
   /* pop() can only be called by the thread which owns this queue */
   Job *pop( void ) {
     for (;;) {
@@ -187,30 +204,42 @@ struct WSQ {
     }
   }
   /* steal() must be called by threads which do not own this queue */
-  Job *steal( void ) {
+  uint16_t steal( uint16_t n,  Job **job ) {
     for (;;) {
       uint64_t v = this->idx.load( std::memory_order_relaxed );
       WSQIndex i( v );
       if ( i.count == 0 ) /* nothing available */
-        return nullptr;
-      WSQIndex j = { (uint16_t) ( ( i.top+1 ) & MASK_JOBS ), i.bottom,
-                     (uint16_t) ( i.count-1 ), 0 };
+        return 0;
+      if ( n > i.count / 2 + 1 )
+        n = i.count / 2 + 1;
+      WSQIndex j = { (uint16_t) ( ( i.top+n ) & MASK_JOBS ), i.bottom,
+                     (uint16_t) ( i.count-n ), 0 };
       /* try to fetch the next available index */
       if ( std::atomic_compare_exchange_strong( &this->idx, &v, j.u64() ) ) {
-        for (;;) {
-          Job *job = this->entries[ i.top ].exchange( nullptr,
+        for ( uint16_t k = 0; ; ) {
+          job[ k ] = this->entries[ i.top ].exchange( nullptr,
                                                 std::memory_order_relaxed );
-          if ( job != nullptr )
-            return job;
-          pause_thread();
+          if ( job[ k ] != nullptr ) {
+            if ( ++k == n )
+              return k;
+          }
+          else {
+            pause_thread();
+          }
         }
       }
     }
   }
-  /* test if space available */
-  uint32_t have_space( void ) const {
+  /* test if space available for multi-push */
+  uint16_t multi_push_avail( uint16_t maxn ) const {
     WSQIndex i = this->idx.load( std::memory_order_relaxed );
-    return i.count;
+    uint16_t k;
+    for ( k = 0; k < maxn && k < i.count; k++ ) {
+      if ( this->entries[ ( i.top + k ) & MASK_JOBS ].
+                 load( std::memory_order_relaxed ) != nullptr )
+        break;
+    }
+    return k;
   }
 };
 
@@ -234,12 +263,10 @@ struct JobTaskThread {
   }
   /* allocate space from cur_block for job */
   void * alloc_job( void );
-  /* fetch space available;  this is volatile, it may change */
-  uint32_t have_queue_space( void ) const {
-    return this->queue.have_space();
-  }
   /* kick job and do work until it is done */
   void kick_and_wait_for( Job &j );
+  /* kick several jobs */
+  void kick_jobs( Job **jar,  uint16_t n );
   /* do work until sys is running */
   void wait_for_termination( void ); /* run jobs until is_sys_active false */
   /* run j */
@@ -351,17 +378,22 @@ JobTaskThread::create_job_as_child( Job &j,  JobFunction f,  void *d ) {
  * if no jobs there, then try to steal a job randomly from another task */
 Job *
 JobTaskThread::get_valid_job( void ) {
-  Job *j = this->queue.pop();
+  Job * j = this->queue.pop();
   if ( j != nullptr )
     return j;
+  Job    * jar[ 16 ];
+  uint16_t n     = this->queue.multi_push_avail( 15 );
   uint32_t count = this->ctx.task_count.load( std::memory_order_relaxed ),
            next  = this->rand.next() % count;
   for ( uint32_t k = 0; k < count; k++ ) {
     /* don't try to steal from myself */
     if ( this->ctx.task[ next ] != this ) {
-      j = this->ctx.task[ next ]->queue.steal();
-      if ( j != nullptr )
-        return j;
+      n = this->ctx.task[ next ]->queue.steal( n + 1, jar );
+      if ( n > 0 ) {
+        if ( n > 1 )
+          this->queue.multi_push( &jar[ 1 ], n - 1 );
+        return jar[ 0 ];
+      }
     }
     if ( ++next == count )
       next = 0;
@@ -410,6 +442,21 @@ JobTaskThread::kick_and_wait_for( Job &j ) {
       this->execute( *k );
     else
       pause_thread();
+  }
+}
+
+void
+JobTaskThread::kick_jobs( Job **jar,  uint16_t n ) {
+  uint16_t j;
+  for ( uint16_t i = 0; i < n; i += j ) {
+    j = this->queue.multi_push_avail( n - i );
+    if ( j == 0 ) {
+      jar[ i ]->kick();
+      j = 1;
+    }
+    else {
+      this->queue.multi_push( &jar[ i ], j );
+    }
   }
 }
 

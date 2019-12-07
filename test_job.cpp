@@ -10,8 +10,6 @@ worker_thread_function( JobTaskThread *w ) {
   w->wait_for_termination(); /* run jobs until done */
 }
 
-std::atomic<uint64_t> job_cnt;
-
 /* cpus used and test iteraitions */
 static uint32_t parallel_jobs     = 10000, /* how many parallel jobs */
                 num_cores         = 8,    /* can't be more than MAX_TASKS */
@@ -41,14 +39,14 @@ work_task_job( JobTaskThread &w,  Job &/*j*/ ) {
 
 static void
 start_jobs( JobTaskThread &w,  Job &j,  uint64_t njobs ) {
-  for ( uint64_t k = 0; ; ) {
-    /* stop when parallel_jobs is exhausted */
-    if ( job_cnt.fetch_add( 1, std::memory_order_relaxed ) ==
-         parallel_jobs )
-      return;
-    w.create_job_as_child( j, work_task_job )->kick();
-    if ( ++k == njobs )
-      return;
+  Job *jar[ 32 ];
+  uint64_t m = 32;
+  for ( uint64_t k = 0; k < njobs; k += m ) {
+    if ( k + 32 > njobs )
+      m = njobs - k;
+    for ( uint64_t i = 0; i < m; i++ )
+      jar[ i ] = w.create_job_as_child( j, work_task_job );
+    w.kick_jobs( jar, m );
   }
 }
 
@@ -150,7 +148,6 @@ main( int argc,  char *argv[] ) {
 
     /* create the root job, which creates work_tasks */
     start_time = std::chrono::high_resolution_clock::now();
-    job_cnt.store( 0, std::memory_order_seq_cst );
     Job *j = m->create_job( root_job_function );
     m->kick_and_wait_for( *j ); /* wait until all children of job are done */
     j->alloc_block.deref(); /* dereference, not needed anymore */

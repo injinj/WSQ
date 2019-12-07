@@ -39,10 +39,10 @@ work_task_job( JobTaskThread &w,  Job &/*j*/ ) {
 
 static void
 start_jobs( JobTaskThread &w,  Job &j,  uint64_t njobs ) {
-  Job *jar[ 32 ];
-  uint64_t m = 32;
+  Job *jar[ 256 ];
+  uint64_t m = 256;
   for ( uint64_t k = 0; k < njobs; k += m ) {
-    if ( k + 32 > njobs )
+    if ( k + 256 > njobs )
       m = njobs - k;
     for ( uint64_t i = 0; i < m; i++ )
       jar[ i ] = w.create_job_as_child( j, work_task_job );

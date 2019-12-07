@@ -383,8 +383,8 @@ JobTaskThread::get_valid_job( void ) {
   Job * j = this->queue.pop();
   if ( j != nullptr )
     return j;
-  Job    * jar[ 16 ];
-  uint16_t n     = this->queue.multi_push_avail( 15 );
+  Job    * jar[ 64 ];
+  uint16_t n     = this->queue.multi_push_avail( 63 );
   uint32_t count = this->ctx.task_count.load( std::memory_order_relaxed ),
            next  = this->rand.next() % count;
   for ( uint32_t k = 0; k < count; k++ ) {

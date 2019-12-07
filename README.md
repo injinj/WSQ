@@ -49,7 +49,7 @@ worker thread.
 ```console
 $ git clone https://injinj.github.com/WSQ
 $ cd WSQ
-$ g++ -std=c++11 -O3 -ggdb test_job.cpp -pthread
+$ g++ -Wall -Wextra -std=c++11 -O3 test_job.cpp -pthread
 $ a.out -c 1
 Sizeof Job Sys Ctx: 528
 Sizeof Job Thread:  524352
@@ -60,29 +60,41 @@ Serial workload:    1000 iterations
 Parallel workload:  10000 jobs
 Workload  Serial Elapsed  Parallel Elapsed  Speedup
 --------  --------------  ----------------  -------
-     100          143 ns            236 ns     0.61  (- 93 / thr: 93)
-     200          288 ns            383 ns     0.75  (- 95 / thr: 95)
-     300          432 ns            518 ns     0.83  (- 86 / thr: 86)
-     400          578 ns            650 ns     0.89  (- 72 / thr: 72)
-     500          721 ns            792 ns     0.91  (- 71 / thr: 71)
-     600          870 ns            938 ns     0.93  (- 68 / thr: 68)
+     100          143 ns            239 ns     0.60  (- 96 / thr: 96)
+     200          291 ns            384 ns     0.76  (- 93 / thr: 93)
+     300          453 ns            527 ns     0.86  (- 74 / thr: 74)
+     400          597 ns            653 ns     0.91  (- 56 / thr: 56)
+     500          725 ns            791 ns     0.92  (- 66 / thr: 66)
 ^C
 $ a.out -c 2                                                            
 ...
 Workload  Serial Elapsed  Parallel Elapsed  Speedup
 --------  --------------  ----------------  -------
-     100          142 ns            276 ns     0.51  (- 134 / thr: 67)
-     200          287 ns            285 ns     1.01
-     300          435 ns            345 ns     1.26
-     400          579 ns            409 ns     1.42
+     100          143 ns            233 ns     0.61  (- 90 / thr: 45)
+     200          289 ns            268 ns     1.08
+     300          432 ns            322 ns     1.34
+     400          598 ns            390 ns     1.53
+     500          725 ns            457 ns     1.59
 ^C
 $ a.out -c 3
 ...
 Workload  Serial Elapsed  Parallel Elapsed  Speedup
 --------  --------------  ----------------  -------
-     100          144 ns            473 ns     0.30  (- 329 / thr: 109)
-     200          287 ns            375 ns     0.77  (- 88 / thr: 29)
-     300          432 ns            335 ns     1.29
+     100          147 ns            408 ns     0.36  (- 261 / thr: 87)
+     200          287 ns            296 ns     0.97  (- 9 / thr: 3)
+     300          433 ns            301 ns     1.44
+     400          581 ns            326 ns     1.78
+     500          724 ns            347 ns     2.09
+^C
+$ a.out -c 4
+...
+Workload  Serial Elapsed  Parallel Elapsed  Speedup
+--------  --------------  ----------------  -------
+     100          142 ns            417 ns     0.34  (- 275 / thr: 68)
+     200          287 ns            391 ns     0.73  (- 104 / thr: 26)
+     300          436 ns            360 ns     1.21
+     400          583 ns            295 ns     1.98
+     500          744 ns            314 ns     2.37
 ^C
 ```
 
@@ -113,8 +125,4 @@ gnuplot> load "plot.gnuplot"
 
 ![Job Stealing Queue](jsq.svg)
 
-I believe that a lower overhead W.S. Queue may be obtained by the ability to
-schedule many jobs in one call rather than one job at a time, but first, I
-would like some other workload beyond this synthetic one for a more real world
-scenario.  Maybe a sorting, a compression, or an indexing workload.
 

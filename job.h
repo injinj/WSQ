@@ -217,8 +217,8 @@ struct WSQ {
       /* try to fetch the next available index */
       if ( std::atomic_compare_exchange_strong( &this->idx, &v, j.u64() ) ) {
         for ( uint16_t k = 0; ; ) {
-          job[ k ] = this->entries[ i.top ].exchange( nullptr,
-                                                std::memory_order_relaxed );
+          job[ k ] = this->entries[ ( i.top + k ) & MASK_JOBS ].
+                           exchange( nullptr, std::memory_order_relaxed );
           if ( job[ k ] != nullptr ) {
             if ( ++k == n )
               return k;
@@ -234,7 +234,9 @@ struct WSQ {
   uint16_t multi_push_avail( uint16_t maxn ) const {
     WSQIndex i = this->idx.load( std::memory_order_relaxed );
     uint16_t k;
-    for ( k = 0; k < maxn && k < i.count; k++ ) {
+    if ( maxn > FULL_QUEUE_JOBS - i.count )
+      maxn = FULL_QUEUE_JOBS - i.count;
+    for ( k = 0; k < maxn; k++ ) {
       if ( this->entries[ ( i.top + k ) & MASK_JOBS ].
                  load( std::memory_order_relaxed ) != nullptr )
         break;

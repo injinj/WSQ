@@ -130,10 +130,15 @@ struct Job {
   void finish( void );
 };
 
+/* work stealing queue:  an array of jobs and index of top and bottom, with
+ * a counter that tracks how many empty slots are available -- this is
+ * different than the count of slots available because stealing threads
+ * may not yet have taken a job out of the entries[] array, but they have
+ * incremented the counters */
 struct WSQ {
   std::atomic<Job *>    entries[ MAX_QUEUE_JOBS ]; /* queue of jobs */
-  std::atomic<uint64_t> idx;       /* the WSQIndex packed in 64 bits */
-  const uint16_t        worker_id; /* owner of queue */
+  std::atomic<uint64_t> idx;        /* the WSQIndex packed in 64 bits */
+  const uint16_t        worker_id;  /* owner of queue */
   uint16_t              push_avail; /* number of push slots available */
 
   WSQ( uint16_t id ) : worker_id( id ), push_avail( FULL_QUEUE_JOBS ) {
@@ -152,24 +157,30 @@ struct WSQ {
                    (uint16_t) ( i.count+1 ), (uint16_t) ( job.job_id ) };
     /* try to acquire an entries[] index for job */
     if ( std::atomic_compare_exchange_strong( &this->idx, &v, j.u64() ) ) {
-      for (;;) {
-        Job * old = this->entries[ i.bottom ].exchange( nullptr,
-                                                  std::memory_order_relaxed );
-        /* if old is null, put job in queue */
-        if ( old == nullptr ) {
-           old = this->entries[ i.bottom ].exchange( &job,
-                                                  std::memory_order_relaxed );
-           assert( old == nullptr ); /* error, should be empty */
-           return true;
-         }
-         /* put old back and pause while stealer is sleeping */
-         this->entries[ i.bottom ].exchange( old, std::memory_order_relaxed );
-         pause_thread();
+      if ( this->push_avail == 0 ) {
+        for (;;) {
+          /* it's possible that a stealing thread incremented idx but did not
+           * yet take the job out of the entries[] array */
+          Job * old = this->entries[ i.bottom ].exchange( nullptr,
+                                                    std::memory_order_relaxed );
+          /* if old is null, put job in queue */
+          if ( old == nullptr )
+            break;
+          /* put old back and pause while stealer is sleeping */
+          this->entries[ i.bottom ].exchange( old, std::memory_order_relaxed );
+          pause_thread();
+        }
       }
+      else { /* when push available, already know entries[ bottom ] is null */
+        this->push_avail -= 1;
+      }
+      this->entries[ i.bottom ].store( &job, std::memory_order_relaxed );
+      return true;
     }
     return false; /* failed to acquire idx location */
   }
-  /* push multiple items */
+  /* push multiple items, should only be called when push_avail >= n, the
+   * push_avail counter tracks how many empty (null) slots are available */
   void multi_push( Job **jar,  uint16_t n ) {
     this->push_avail -= n;
     for (;;) {
@@ -212,6 +223,7 @@ struct WSQ {
       WSQIndex i( v );
       if ( i.count == 0 ) /* nothing available */
         return 0;
+      /* if trying to steal multiple items, balance the queues */
       if ( n > i.count / 2 + 1 )
         n = i.count / 2 + 1;
       WSQIndex j = { (uint16_t) ( ( i.top+n ) & MASK_JOBS ), i.bottom,

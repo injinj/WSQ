@@ -138,6 +138,7 @@ struct Job {
 struct WSQ {
   std::atomic<Job *>    entries[ MAX_QUEUE_JOBS ]; /* queue of jobs */
   std::atomic<uint64_t> idx;        /* the WSQIndex packed in 64 bits */
+  uint8_t               pad[ 64 - 8 ]; /* keep idx separate from push_avail */
   const uint16_t        worker_id;  /* owner of queue */
   uint16_t              push_avail; /* number of push slots available */
 

@@ -64,7 +64,7 @@
 !./a.out -c 16 -g > 16-core.txt
 !tail -1 16-core.txt | awk '{ printf "%s %s 16-core\n", $2, $4 }' > 16-corelabel.txt
 
-set title "Job Stealing Queue (100000 jobs x workload nonoseconds)"
+set title "Work Stealing Queue (10000 Jobs * Workload Nonoseconds)"
 set xlabel "Workload Nanoseconds"
 set ylabel "Parallel Speedup"
 unset key

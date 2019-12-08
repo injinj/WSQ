@@ -219,29 +219,27 @@ struct WSQ {
   }
   /* steal() must be called by threads which do not own this queue */
   uint16_t steal( uint16_t n,  Job **job ) {
-    for (;;) {
-      uint64_t v = this->idx.load( std::memory_order_relaxed );
-      WSQIndex i( v );
-      if ( i.count == 0 ) /* nothing available */
-        return 0;
-      /* if trying to steal multiple items, balance the queues */
-      if ( n > i.count / 2 + 1 )
-        n = i.count / 2 + 1;
-      WSQIndex j = { (uint16_t) ( ( i.top+n ) & MASK_JOBS ), i.bottom,
-                     (uint16_t) ( i.count-n ), 0 };
-      /* try to fetch the next available index */
-      if ( std::atomic_compare_exchange_strong( &this->idx, &v, j.u64() ) ) {
-        for ( uint16_t k = 0; ; ) {
-          job[ k ] = this->entries[ ( i.top + k ) & MASK_JOBS ].
-                           exchange( nullptr, std::memory_order_relaxed );
-          if ( job[ k ] != nullptr ) {
-            if ( ++k == n )
-              return k;
-          }
-          else {
-            pause_thread();
-          }
-        }
+    uint64_t v = this->idx.load( std::memory_order_relaxed );
+    WSQIndex i( v );
+    if ( i.count == 0 ) /* nothing available */
+      return 0;
+    /* if trying to steal multiple items, balance the queues */
+    if ( n > i.count / 2 + 1 )
+      n = i.count / 2 + 1;
+    WSQIndex j = { (uint16_t) ( ( i.top+n ) & MASK_JOBS ), i.bottom,
+                   (uint16_t) ( i.count-n ), 0 };
+    /* try to fetch the next available index */
+    if ( ! std::atomic_compare_exchange_strong( &this->idx, &v, j.u64() ) )
+      return 0;
+    for ( uint16_t k = 0; ; ) {
+      job[ k ] = this->entries[ ( i.top + k ) & MASK_JOBS ].
+                       exchange( nullptr, std::memory_order_relaxed );
+      if ( job[ k ] != nullptr ) {
+        if ( ++k == n )
+          return k;
+      }
+      else {
+        pause_thread();
       }
     }
   }

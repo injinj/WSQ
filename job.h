@@ -154,8 +154,8 @@ struct WSQ {
     /* if no space left, return false */
     if ( i.count == FULL_QUEUE_JOBS )
       return false;
-    WSQIndex j = { i.top, (uint16_t) ( ( i.bottom+1 ) & MASK_JOBS ),
-                   (uint16_t) ( i.count+1 ), (uint16_t) ( job.job_id ) };
+    WSQIndex j = { i.top, (uint16_t) ( ( i.bottom + 1 ) & MASK_JOBS ),
+                   (uint16_t) ( i.count + 1 ), (uint16_t) ( job.job_id ) };
     /* try to acquire an entries[] index for job */
     if ( std::atomic_compare_exchange_strong( &this->idx, &v, j.u64() ) ) {
       if ( this->push_avail == 0 ) {
@@ -187,8 +187,8 @@ struct WSQ {
     for (;;) {
       uint64_t v = this->idx.load( std::memory_order_relaxed );
       WSQIndex i( v );
-      WSQIndex j = { i.top, (uint16_t) ( ( i.bottom+n ) & MASK_JOBS ),
-                     (uint16_t) ( i.count+n ), 2 };
+      WSQIndex j = { i.top, (uint16_t) ( ( i.bottom + n ) & MASK_JOBS ),
+                     (uint16_t) ( i.count + n ), 2 };
       /* try to acquire an entries[] index for job */
       if ( std::atomic_compare_exchange_strong( &this->idx, &v, j.u64() ) ) {
         for ( uint16_t k = 0; k < n; k++ ) {
@@ -206,8 +206,8 @@ struct WSQ {
       WSQIndex i( v );
       if ( i.count == 0 ) /* if nothing in the queue */
         return nullptr;
-      WSQIndex j = { i.top, (uint16_t) ( ( i.bottom-1 ) & MASK_JOBS ),
-                     (uint16_t) ( i.count-1 ), 1 };
+      WSQIndex j = { i.top, (uint16_t) ( ( i.bottom - 1 ) & MASK_JOBS ),
+                     (uint16_t) ( i.count - 1 ), 1 };
       /* fetch idx location, it could be stolen first */
       if ( std::atomic_compare_exchange_strong( &this->idx, &v, j.u64() ) ) {
         Job *job = this->entries[ j.bottom ].exchange( nullptr,
@@ -218,7 +218,7 @@ struct WSQ {
     }
   }
   /* steal() must be called by threads which do not own this queue */
-  uint16_t steal( uint16_t n,  Job **job ) {
+  uint16_t steal( uint16_t n,  Job **jar ) {
     uint64_t v = this->idx.load( std::memory_order_relaxed );
     WSQIndex i( v );
     if ( i.count == 0 ) /* nothing available */
@@ -226,19 +226,19 @@ struct WSQ {
     /* if trying to steal multiple items, balance the queues */
     if ( n > i.count / 2 + 1 )
       n = i.count / 2 + 1;
-    WSQIndex j = { (uint16_t) ( ( i.top+n ) & MASK_JOBS ), i.bottom,
-                   (uint16_t) ( i.count-n ), 0 };
+    WSQIndex j = { (uint16_t) ( ( i.top + n ) & MASK_JOBS ), i.bottom,
+                   (uint16_t) ( i.count - n ), 0 };
     /* try to fetch the next available index */
     if ( ! std::atomic_compare_exchange_strong( &this->idx, &v, j.u64() ) )
       return 0;
     for ( uint16_t k = 0; ; ) {
-      job[ k ] = this->entries[ ( i.top + k ) & MASK_JOBS ].
+      jar[ k ] = this->entries[ ( i.top + k ) & MASK_JOBS ].
                        exchange( nullptr, std::memory_order_relaxed );
-      if ( job[ k ] != nullptr ) {
+      if ( jar[ k ] != nullptr ) {
         if ( ++k == n )
           return k;
       }
-      else {
+      else { /* could be null if owner hasn't set the entry yet */
         pause_thread();
       }
     }
@@ -363,8 +363,7 @@ JobSysCtx::initialize_worker( int64_t seed,  void *data ) {
 }
 
 void *
-JobTaskThread::alloc_job( void )
-{
+JobTaskThread::alloc_job( void ) {
   void * m;
   if ( this->cur_block == NULL ||
        (m = this->cur_block->new_job()) == NULL ) {

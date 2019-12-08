@@ -237,8 +237,8 @@ struct WSQ {
     if ( maxn <= this->push_avail )
       return maxn;
     WSQIndex i = this->idx.load( std::memory_order_relaxed );
-    uint16_t k;
-    for ( k = 0; k < FULL_QUEUE_JOBS; k++ ) {
+    uint16_t k, avail = FULL_QUEUE_JOBS - i.count;
+    for ( k = 0; k < avail; k++ ) {
       if ( this->entries[ ( i.bottom + k ) & MASK_JOBS ].
                  load( std::memory_order_relaxed ) != nullptr )
         break;

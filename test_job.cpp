@@ -46,15 +46,7 @@ start_jobs( JobTaskThread &w,  Job &j,  uint64_t njobs ) {
       m = njobs - k;
     for ( uint64_t i = 0; i < m; i++ )
       jar[ i ] = w.create_job_as_child( j, work_task_job );
-    w.kick_jobs( jar, m );
-    if ( w.queue.multi_push_avail( 256 ) < 256 ) {
-      for ( uint16_t cnt = 0; cnt < 256; cnt++ ) {
-        Job *j2 = w.get_valid_job();
-        if ( j2 == nullptr )
-          break;
-        w.execute( *j2 );
-      }
-    }
+    w.do_work_and_kick_jobs( jar, m );
   }
 }
 

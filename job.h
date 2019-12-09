@@ -285,6 +285,8 @@ struct JobTaskThread {
   void kick_and_wait_for( Job &j );
   /* kick several jobs */
   void kick_jobs( Job **jar,  uint16_t n );
+  /* do work until there is space for n jobs */
+  void do_work_and_kick_jobs( Job **jar,  uint16_t n );
   /* do work until sys is running */
   void wait_for_termination( void ); /* run jobs until is_sys_active false */
   /* run j */
@@ -462,6 +464,8 @@ JobTaskThread::kick_and_wait_for( Job &j ) {
   }
 }
 
+/* start multiple jobs by adding them to the queue
+ * this may deadlock, since it does not do work to clear space */
 void
 JobTaskThread::kick_jobs( Job **jar,  uint16_t n ) {
   uint16_t j;
@@ -473,6 +477,37 @@ JobTaskThread::kick_jobs( Job **jar,  uint16_t n ) {
     }
     else {
       this->queue.multi_push( &jar[ i ], j );
+    }
+  }
+}
+
+/* does the above, but clears enough space for jobs by running them
+ * this may not be desirable when running jobs kick other jobs, since that
+ * could be an infinite loop */
+void
+JobTaskThread::do_work_and_kick_jobs( Job **jar,  uint16_t n ) {
+  uint16_t i     = 0,
+           avail = this->queue.push_avail,
+           cnt;
+  for (;;) {
+    if ( i == n )
+      return;
+    if ( avail > 0 ) {
+      cnt = n - i;
+      if ( cnt > avail )
+        cnt = avail;
+      this->queue.multi_push( &jar[ i ], cnt );
+      i += cnt;
+      if ( i == n )
+        return;
+    }
+    while ( (avail = this->queue.multi_push_avail( n - i )) == 0 ) {
+      for ( cnt = 0; cnt < n - i; cnt++ ) {
+        Job *j = this->queue.pop();
+        if ( j == nullptr )
+          break;
+        this->execute( *j );
+      }
     }
   }
 }

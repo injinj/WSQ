@@ -17,6 +17,11 @@ Queue](https://stackoverflow.com/questions/27830691/work-stealing-and-deques)
 which is probably taught in many CS classes like [CSE P 506 -
 Concurrency](https://courses.cs.washington.edu/courses/csep506/11sp/Home.html).
 
+The version described by Stefan is a variation of a [Chase Lev dequeue](https://www.dre.vanderbilt.edu/~schmidt/PDF/work-stealing-dequeue.pdf).
+There is an implementation of that work queue in [Aamanieu](https://github.com/Amanieu)'s
+[asyncplusplus](https://github.com/Amanieu/asyncplusplus) in the default task scheduler.
+This is the header file for it: [work_steal_queue.h](https://github.com/Amanieu/asyncplusplus/blob/master/src/work_steal_queue.h).
+
 ## Description of Algorithm
 
 A Work Stealing Queue is a double ended queue that each thread/core maintains.

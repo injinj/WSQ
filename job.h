@@ -80,25 +80,25 @@ struct WSQIndex {
   uint16_t top,    /* the first job pushed */
            bottom, /* the last job pushed */
            count,  /* count of elems available */
-           used;   /* lower 16 bits of job id (useful for debugging) */
+           ocount; /* old value of count (useful for debugging) */
   WSQIndex() {}
   WSQIndex( uint16_t t,  uint16_t b,  uint16_t c,  uint16_t u ) {
     this->top    = t;
     this->bottom = b;
     this->count  = c;
-    this->used   = u;
+    this->ocount = u;
   }
   WSQIndex( uint64_t v ) {
     this->top    = (uint16_t) ( v >> 48 );
     this->bottom = (uint16_t) ( v >> 32 );
     this->count  = (uint16_t) ( v >> 16 );
-    this->used   = (uint16_t) ( v >> 0 );
+    this->ocount = (uint16_t) ( v >> 0 );
   }
   uint64_t u64( void ) const {
     return ( (uint64_t) this->top << 48 ) |
            ( (uint64_t) this->bottom << 32 ) |
            ( (uint64_t) this->count << 16 ) |
-           ( (uint64_t) this->used << 0 );
+           ( (uint64_t) this->ocount << 0 );
   }
 };
 
@@ -109,7 +109,6 @@ struct Job {
   Job                 * parent;      /* if a child job */
   void                * data;        /* closure data */
   JobAllocBlock       & alloc_block; /* allocation location for job release */
-  const uint64_t        job_id;      /* unique job counter */
   std::atomic<uint32_t> unfinished_jobs; /* if children are not yet finished */
   uint16_t              execute_worker_id; /* which thraed executed job */
   bool                  is_done,    /* set after finished */
@@ -155,7 +154,7 @@ struct WSQ {
     if ( i.count == FULL_QUEUE_JOBS )
       return false;
     WSQIndex j = { i.top, (uint16_t) ( ( i.bottom + 1 ) & MASK_JOBS ),
-                   (uint16_t) ( i.count + 1 ), (uint16_t) ( job.job_id ) };
+                   (uint16_t) ( i.count + 1 ), i.count };
     /* try to acquire an entries[] index for job */
     if ( std::atomic_compare_exchange_strong( &this->idx, &v, j.u64() ) ) {
       if ( this->push_avail == 0 ) {
@@ -188,7 +187,7 @@ struct WSQ {
       uint64_t v = this->idx.load( std::memory_order_relaxed );
       WSQIndex i( v );
       WSQIndex j = { i.top, (uint16_t) ( ( i.bottom + n ) & MASK_JOBS ),
-                     (uint16_t) ( i.count + n ), 2 };
+                     (uint16_t) ( i.count + n ), i.count };
       /* try to acquire an entries[] index for job */
       if ( std::atomic_compare_exchange_strong( &this->idx, &v, j.u64() ) ) {
         for ( uint16_t k = 0; k < n; k++ ) {
@@ -207,7 +206,7 @@ struct WSQ {
       if ( i.count == 0 ) /* if nothing in the queue */
         return nullptr;
       WSQIndex j = { i.top, (uint16_t) ( ( i.bottom - 1 ) & MASK_JOBS ),
-                     (uint16_t) ( i.count - 1 ), 1 };
+                     (uint16_t) ( i.count - 1 ), i.count };
       /* fetch idx location, it could be stolen first */
       if ( std::atomic_compare_exchange_strong( &this->idx, &v, j.u64() ) ) {
         Job *job = this->entries[ j.bottom ].exchange( nullptr,
@@ -227,7 +226,7 @@ struct WSQ {
     if ( n > i.count / 2 + 1 )
       n = i.count / 2 + 1;
     WSQIndex j = { (uint16_t) ( ( i.top + n ) & MASK_JOBS ), i.bottom,
-                   (uint16_t) ( i.count - n ), 0 };
+                   (uint16_t) ( i.count - n ), i.count };
     /* try to fetch the next available index */
     if ( ! std::atomic_compare_exchange_strong( &this->idx, &v, j.u64() ) )
       return 0;
@@ -336,7 +335,7 @@ struct JobAllocBlock {
 /* the global state for the tasking system */
 struct JobSysCtx {
   JobTaskThread       * task[ MAX_TASKS ]; /* all of the threads */
-  std::atomic<uint64_t> job_counter;       /* incremented for each job */
+  std::atomic<uint32_t> wait_count;        /* how many task[] are in waiting */
   std::atomic<uint32_t> task_count;        /* how many task[] are used */
   std::atomic<bool>     is_sys_active;     /* threads exit when false */
 
@@ -349,7 +348,7 @@ struct JobSysCtx {
   void deactivate( void ) {
     this->is_sys_active.store( false, std::memory_order_relaxed );
   }
-  JobSysCtx() : job_counter( 0 ), task_count( 0 ), is_sys_active( false ) {}
+  JobSysCtx() : wait_count( 0 ), task_count( 0 ), is_sys_active( false ) {}
 };
 
 /* construct a new thread worker, including a queue for jobs to run */
@@ -423,12 +422,23 @@ JobTaskThread::get_valid_job( void ) {
 /* task blocks/runs jobs until system is shutdown */
 void
 JobTaskThread::wait_for_termination( void ) {
+  bool is_waiting = false;
   while ( this->ctx.is_sys_active.load( std::memory_order_relaxed ) ) {
     Job *j = this->get_valid_job();
-    if ( j != nullptr )
+    if ( j != nullptr ) {
+      if ( is_waiting ) {
+        is_waiting = false;
+        this->ctx.wait_count.fetch_sub( 1, std::memory_order_relaxed );
+      }
       this->execute( *j );
-    else
+    }
+    else {
+      if ( ! is_waiting ) {
+        is_waiting = true;
+        this->ctx.wait_count.fetch_add( 1, std::memory_order_relaxed );
+      }
       pause_thread();
+    }
   }
 }
 
@@ -439,7 +449,6 @@ JobTaskThread::execute( Job &j ) {
     std::cout << "worker " << this->worker_id
           << " exec worker " << j.execute_worker_id
           << " owner " << j.thr.worker_id
-          << " job " << j.job_id
           << " is done!!\n";
     assert( 0 );
   }
@@ -516,7 +525,6 @@ JobTaskThread::do_work_and_kick_jobs( Job **jar,  uint16_t n ) {
 Job::Job( JobTaskThread &t,  JobFunction f,  void *d,  Job *p )
   : thr( t ), function( f ), parent( p ), data( d ),
     alloc_block( *t.cur_block ),
-    job_id( t.ctx.job_counter.fetch_add( 1, std::memory_order_relaxed ) ),
     execute_worker_id( 0 ), is_done( false ), is_waiting( false ) {
   this->unfinished_jobs.store( 1, std::memory_order_relaxed );
   if ( p != nullptr )

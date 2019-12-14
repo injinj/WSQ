@@ -30,15 +30,15 @@ work_task( int &result ) {
 static void
 work_task_job( JobTaskThread &w,  Job &/*j*/ ) {
   int result = 0;
-  /* track job make sure all have run and not twice */
-  /* set_job_bit( j.job_id );*/
   /* do the work */
   work_task( result );
   *(int *) w.data += result;
 }
 
+/* this version has a parent child relationship, with lock: xadd notify */
+#if SLOWER_START_JOBS
 static void
-start_jobs( JobTaskThread &w,  Job &j,  uint64_t njobs ) {
+slower_start_jobs( JobTaskThread &w,  Job &j,  uint64_t njobs ) {
   Job *jar[ 256 ];
   uint64_t m = 256;
   for ( uint64_t k = 0; k < njobs; k += m ) {
@@ -52,9 +52,23 @@ start_jobs( JobTaskThread &w,  Job &j,  uint64_t njobs ) {
 
 static void
 root_job_function( JobTaskThread &w,  Job &j ) {
-  /*set_job_bit( j.job_id );*/
-  start_jobs( w, j, parallel_jobs );
+  slower_start_jobs( w, j, parallel_jobs );
 }
+#else
+
+static void
+faster_start_jobs( JobTaskThread &w,  uint64_t njobs ) {
+  Job *jar[ 256 ];
+  uint64_t m = 256;
+  for ( uint64_t k = 0; k < njobs; k += m ) {
+    if ( k + 256 > njobs )
+      m = njobs - k;
+    for ( uint64_t i = 0; i < m; i++ )
+      jar[ i ] = w.create_job( work_task_job );
+    w.do_work_and_kick_jobs( jar, m );
+  }
+}
+#endif
 
 static const char *
 get_arg( int argc, char *argv[], int b, const char *f )
@@ -99,7 +113,8 @@ main( int argc,  char *argv[] ) {
   }
 
   std::chrono::high_resolution_clock::time_point start_time, end_time;
-  uint64_t serial_elapsed_nanos, par_elapsed_nanos, serial_per_job, par_per_job;
+  uint64_t serial_elapsed_nanos, par_elapsed_nanos,
+           serial_per_job[ 7000 / 100 ], par_per_job;
 
   if ( ! graph ) {
     printf( "Sizeof Job Sys Ctx: %lu\n", sizeof( JobSysCtx ) );
@@ -119,20 +134,8 @@ main( int argc,  char *argv[] ) {
   m = job_context.initialize_worker( start_time.time_since_epoch().count(),
                                      &par_result[ 0 ] );
 
-  /* start num_cores - 1 threads */
-  std::thread worker_threads[ num_cores - 1 ];
-  for ( uint32_t i = 1; i < num_cores; i++ ) {
-    /* seed the next worker using main rand */
-    w = job_context.initialize_worker( m->rand.next(), &par_result[ i ] );
-    /* start the worker */
-    worker_threads[ i - 1 ] = std::thread( worker_thread_function, w );
-  }
-
-  if ( ! graph ) {
-    printf( "Workload  Serial Elapsed  Parallel Elapsed  Speedup\n"
-            "--------  --------------  ----------------  -------\n" );
-  }
-  for ( task_workload = 100; task_workload <= 7000; task_workload += 100 ) {
+  /* calculate the serialized times before worker threads are started */
+  for ( task_workload = 7000; task_workload >= 100; task_workload -= 100 ) {
     start_time = std::chrono::high_resolution_clock::now();
     for ( uint32_t j = 0; j < serial_iterations; j++ ) {
       int result = 0;
@@ -141,16 +144,57 @@ main( int argc,  char *argv[] ) {
     }
     end_time = std::chrono::high_resolution_clock::now();
 
+    size_t x = ( task_workload - 100 ) / 100;
     serial_elapsed_nanos =
       std::chrono::duration_cast<std::chrono::nanoseconds>(end_time-start_time)
         .count();
-    serial_per_job = serial_elapsed_nanos / serial_iterations;
+    serial_per_job[ x ] = serial_elapsed_nanos / serial_iterations;
+    if ( ! graph ) {
+      printf( "." ); fflush( stdout );
+    }
+  }
 
+  if ( ! graph ) {
+    printf( "\n" );
+    printf( "Workload  Serial Elapsed  Parallel Elapsed  Speedup\n"
+            "--------  --------------  ----------------  -------\n" );
+  }
+  /* start num_cores - 1 threads */
+  std::thread worker_threads[ num_cores - 1 ];
+  for ( uint32_t i = 1; i < num_cores; i++ ) {
+    /* seed the next worker using main rand */
+    w = job_context.initialize_worker( m->rand.next(), &par_result[ i ] );
+    /* start the worker */
+    worker_threads[ i - 1 ] = std::thread( worker_thread_function, w );
+  }
+  /* wait for workers to start */
+  while ( job_context.wait_count
+                     .load( std::memory_order_relaxed ) != num_cores - 1 )
+    pause_thread();
+
+  /* calculate the parallel times by starting jobs */
+  for ( task_workload = 100; task_workload <= 7000; task_workload += 100 ) {
     /* create the root job, which creates work_tasks */
     start_time = std::chrono::high_resolution_clock::now();
+#if SLOWER_START_JOBS
+    /* slower version is the one described by Stefan Reinalter, it tracks
+     * when all children of a parent job are completed */
     Job *j = m->create_job( root_job_function );
     m->kick_and_wait_for( *j ); /* wait until all children of job are done */
     j->alloc_block.deref(); /* dereference, not needed anymore */
+#else
+    /* faster version just tracks until threads are idle */
+    faster_start_jobs( *m, parallel_jobs );
+    Job *j = m->get_valid_job();
+    while ( j != nullptr ) { /* run jobs until done */
+      m->execute( *j );
+      j = m->get_valid_job();
+    }
+    /* wait for threads to complete their jobs */
+    while ( job_context.wait_count
+                       .load( std::memory_order_relaxed ) != num_cores - 1 )
+      pause_thread();
+#endif
     end_time = std::chrono::high_resolution_clock::now();
 
     par_elapsed_nanos =
@@ -158,20 +202,21 @@ main( int argc,  char *argv[] ) {
         .count();
     par_per_job = par_elapsed_nanos / parallel_jobs;
 
+    size_t x = ( task_workload - 100 ) / 100;
     if ( ! graph ) {
       printf( "%8u  ", task_workload );
-      printf( "%11lu ns  ", serial_per_job );
+      printf( "%11lu ns  ", serial_per_job[ x ] );
       printf( "%13lu ns  ", par_per_job );
-      printf( "%7.2f", (double) serial_per_job / (double) par_per_job );
-      if ( serial_per_job < par_per_job )
+      printf( "%7.2f", (double) serial_per_job[ x ] / (double) par_per_job );
+      if ( serial_per_job[ x ] < par_per_job )
         printf( "  (- %lu / thr: %lu)",
-                par_per_job - serial_per_job,
-                ( par_per_job - serial_per_job ) / num_cores );
+                par_per_job - serial_per_job[ x ],
+                ( par_per_job - serial_per_job[ x ] ) / num_cores );
       printf( "\n" );
     }
     else {
-      printf( "%u %lu %lu %.2f\n", task_workload, serial_per_job, par_per_job,
-              (double) serial_per_job / (double) par_per_job );
+      printf( "%u %lu %lu %.2f\n", task_workload, serial_per_job[ x ],
+             par_per_job, (double) serial_per_job[ x ] / (double) par_per_job );
     }
   }
   job_context.deactivate();   /* tell threads to exit */
@@ -180,35 +225,6 @@ main( int argc,  char *argv[] ) {
   for ( uint32_t i = 1; i < num_cores; i++ )
     worker_threads[ i - 1 ].join();
 
-  /*check_all_jobs_have_run();
-  printf( "All bits set, success!\n" );*/
   return 0;
 }
 
-#if 0
-std::atomic<uint64_t> bits[ ( parallel_jobs + 1 + 63 ) / 64 ];
-
-static void
-set_job_bit( uint64_t job_id ) {
-  /* track when jobs have run */
-  for (;;) {
-    uint64_t o = job_id / 64;
-    uint64_t b = bits[ o ].load( std::memory_order_acquire ),
-             c = b | ( (uint64_t) 1 << ( job_id % 64 ) );
-    assert( b != c ); /* error: Task job_id already run */
-    if ( std::atomic_compare_exchange_strong( &bits[ o ], &b, c ) )
-      break;
-  }
-}
-
-static void
-check_all_jobs_have_run( void ) {
-  /* root job is job_id 0 */
-  for ( uint64_t job_id = 0; job_id < parallel_jobs + 1; job_id++ ) {
-    uint64_t o = job_id / 64,
-             b = bits[ o ].load( std::memory_order_acquire ),
-             c = (uint64_t) 1 << ( job_id % 64 );
-    assert( ( b & c ) != 0 ); /* error: Task job_id not run!! */
-  }
-}
-#endif

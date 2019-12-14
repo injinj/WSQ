@@ -57,49 +57,46 @@ $ cd WSQ
 $ g++ -Wall -Wextra -std=c++11 -O3 test_job.cpp -pthread
 $ a.out -c 1
 Sizeof Job Sys Ctx: 528
-Sizeof Job Thread:  524352
-Sizeof Job:         56
+Sizeof Job Thread:  524408
+Sizeof Job:         48
 Sizeof Job Alloc:   65480
 Number of threads:  1
 Serial workload:    1000 iterations
 Parallel workload:  10000 jobs
+......................................................................
 Workload  Serial Elapsed  Parallel Elapsed  Speedup
 --------  --------------  ----------------  -------
-     100          143 ns            239 ns     0.60  (- 96 / thr: 96)
-     200          291 ns            384 ns     0.76  (- 93 / thr: 93)
-     300          453 ns            527 ns     0.86  (- 74 / thr: 74)
-     400          597 ns            653 ns     0.91  (- 56 / thr: 56)
-     500          725 ns            791 ns     0.92  (- 66 / thr: 66)
+     100          142 ns            192 ns     0.74  (- 50 / thr: 50)
+     200          287 ns            335 ns     0.86  (- 48 / thr: 48)
+     300          432 ns            474 ns     0.91  (- 42 / thr: 42)
+     400          579 ns            605 ns     0.96  (- 26 / thr: 26)
 ^C
 $ a.out -c 2                                                            
 ...
 Workload  Serial Elapsed  Parallel Elapsed  Speedup
 --------  --------------  ----------------  -------
-     100          143 ns            233 ns     0.61  (- 90 / thr: 45)
-     200          289 ns            268 ns     1.08
-     300          432 ns            322 ns     1.34
-     400          598 ns            390 ns     1.53
-     500          725 ns            457 ns     1.59
+     100          142 ns            106 ns     1.34
+     200          289 ns            169 ns     1.71
+     300          432 ns            237 ns     1.82
+     400          579 ns            308 ns     1.88
 ^C
 $ a.out -c 3
 ...
 Workload  Serial Elapsed  Parallel Elapsed  Speedup
 --------  --------------  ----------------  -------
-     100          147 ns            408 ns     0.36  (- 261 / thr: 87)
-     200          287 ns            296 ns     0.97  (- 9 / thr: 3)
-     300          433 ns            301 ns     1.44
-     400          581 ns            326 ns     1.78
-     500          724 ns            347 ns     2.09
+     100          142 ns             87 ns     1.63
+     200          287 ns            128 ns     2.24
+     300          435 ns            174 ns     2.50
+     400          577 ns            218 ns     2.65
 ^C
 $ a.out -c 4
 ...
 Workload  Serial Elapsed  Parallel Elapsed  Speedup
 --------  --------------  ----------------  -------
-     100          142 ns            417 ns     0.34  (- 275 / thr: 68)
-     200          287 ns            391 ns     0.73  (- 104 / thr: 26)
-     300          436 ns            360 ns     1.21
-     400          583 ns            295 ns     1.98
-     500          744 ns            314 ns     2.37
+     100          142 ns             70 ns     2.03
+     200          289 ns             99 ns     2.92
+     300          432 ns            133 ns     3.25
+     400          580 ns            174 ns     3.33
 ^C
 ```
 

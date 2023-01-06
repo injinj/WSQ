@@ -144,7 +144,7 @@ struct WSQ {
   WSQ( uint16_t id ) : worker_id( id ), push_avail( FULL_QUEUE_JOBS ) {
     WSQIndex i = { 0, 0, 0, 0 };
     this->idx.store( i.u64(), std::memory_order_relaxed );
-    ::memset( this->entries, 0, sizeof( this->entries ) );
+    ::memset( (void *) this->entries, 0, sizeof( this->entries ) );
   }
   /* try_push() can only be called by the thread which owns this queue */
   bool try_push( Job &job ) {
